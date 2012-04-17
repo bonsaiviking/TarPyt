@@ -12,6 +12,7 @@ Todo
 * Base response on a hash of the request, so it's consistent?
 * Infinite redirects
 * False positives for scanners: SQLi (database errors), etc.
+* abstract-out the functionality to use with WSGI, FastCGI, etc.
 
 Attacks
 -------
