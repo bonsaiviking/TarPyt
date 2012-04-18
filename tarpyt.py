@@ -3,17 +3,29 @@
 import BaseHTTPServer
 import random
 from zlib import adler32
+from optparse import OptionParser
+import pickle
+
+from genmarkov import MarkovBuilder, TagState, MarkovChain
 
 class TarpytHandler(BaseHTTPServer.BaseHTTPRequestHandler,object):
     server_version = 'Apache/1.3.14'
     page_string = "<html><head><title>Welcome to the Labyrinth</title></head><body><ul>{0}</ul></body></html>"
     link_string = '<li><a href="{0}">{0}</a></li>'
+    builder = None
 
     def response_linkpage(self):
         links = []
-        next_path = self.path.rstrip('/') + '/{0}'
+        getlink = None
+        if TarpytHandler.builder:
+            pathlist = ['^']
+            pathlist.extend(self.path.split('/')[:-1])
+            getlink = lambda: '/'.join(pathlist[1:]+[TarpytHandler.builder.uripaths.get(pathlist[-1])]).rstrip('$')
+        else:
+            next_path = self.path.rstrip('/') + '/{0}'
+            getlink = lambda: next_path.format(chr(random.randint(0x61,0x7A)))
         for n in range(0,5):
-            href = next_path.format(chr(random.randint(0x61,0x7A)))
+            href = getlink()
             links.append(TarpytHandler.link_string.format(href))
         response_body = TarpytHandler.page_string.format(''.join(links))
         self.send_response(200)
@@ -44,4 +56,11 @@ def run(server_class=BaseHTTPServer.HTTPServer,
     httpd.serve_forever()
 
 if __name__=='__main__':
+    parser = OptionParser()
+    parser.add_option('-m', '--markov',
+            help='A pickled MarkovBuilder', metavar='FILE')
+    (options, args) = parser.parse_args()
+    if options.markov:
+        mfile = open(options.markov, 'rb')
+        TarpytHandler.builder = pickle.load(mfile)
     run(handler_class=TarpytHandler)

@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 from HTMLParser import HTMLParser, HTMLParseError
+from optparse import OptionParser
 import fileinput
 import pickle
 import random
@@ -43,6 +44,7 @@ class MarkovBuilder(HTMLParser, object):
         self.children = MarkovChain()
         self.attrs = MarkovChain()
         self.data = MarkovChain()
+        self.uripaths = MarkovChain()
         self.tagstack = [TagState()]
         self.maxsibs = 0
         self.maxdepth = 0
@@ -63,6 +65,15 @@ class MarkovBuilder(HTMLParser, object):
         state.prev_child = tag
         prev_attr = tag
         for attr in attrs:
+            if attr[0] == 'href':
+                prev_path = '^'
+                elems = attr[1].split('/')
+                if len(elems) > 1 and elems[1] == '':
+                    elems = elems[3:]
+                for elem in elems:
+                    self.uripaths.add(prev_path, elem)
+                    prev_path = elem
+                self.uripaths.add(prev_path, '$')
             str_attr = u'{0}="{1}"'.format(*attr)
             self.attrs.add(prev_attr, str_attr)
             prev_attr = str_attr
@@ -92,8 +103,8 @@ class MarkovBuilder(HTMLParser, object):
         pass
 
     def save(self, filename='html.mkv'):
-        out = open(filename, mode='wb', encoding='utf-8')
-        pickle.dump(self, out)
+        out = open(filename, mode='wb')
+        pickle.dump(self, out, protocol=2)
 
     def generate(self, tag='html', out=sys.stdout):
         while tag != '$': #Goes forever-ish?
@@ -159,10 +170,15 @@ def parse(filenames):
             pass
         builder.reset()
         filein.close()
-    #builder.save('html.mkv') #TODO: Breaks
     return builder
 
 
 if __name__=='__main__':
-    builder = parse(sys.argv[1:])
+    parser = OptionParser()
+    parser.add_option('-p', '--pickle',
+            help='Pickle the MarkovBuilder into FILE', metavar='FILE')
+    (options, args) = parser.parse_args()
+    builder = parse(args)
+    if options.pickle:
+        builder.save(options.pickle)
     builder.generate()
