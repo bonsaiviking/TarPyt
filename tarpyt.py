@@ -8,6 +8,7 @@ class TarpytHandler(BaseHTTPServer.BaseHTTPRequestHandler,object):
     server_version = 'Apache/1.3.14'
     page_string = "<html><head><title>Welcome to the Labyrinth</title></head><body><ul>{0}</ul></body></html>"
     link_string = '<li><a href="{0}">{0}</a></li>'
+
     def response_linkpage(self):
         links = []
         next_path = self.path.rstrip('/') + '/{0}'
@@ -19,18 +20,19 @@ class TarpytHandler(BaseHTTPServer.BaseHTTPRequestHandler,object):
         self.send_header('Content-Length',len(response_body))
         self.end_headers()
         self.wfile.write(response_body)
+
     def response_redirect(self):
         self.send_response(302)
         self.send_header('Location','/'+chr(random.randint(0x61,0x7A)))
         self.end_headers()
+
     def pick_response(self):
-        responses = (
-                self.response_linkpage,
-                self.response_linkpage,
-                self.response_redirect,
-                )
+        responses = []
+        responses.extend( (self.response_linkpage,) * 3 )
+        responses.extend( (self.response_redirect,) * 1 )
         index = adler32(self.command + self.path) % len(responses)
         return responses[index]
+
     def setup(self):
         super(TarpytHandler, self).setup()
         self.do_GET = lambda: self.pick_response()()
