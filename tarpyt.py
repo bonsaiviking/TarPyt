@@ -20,6 +20,10 @@ class Tarpyt(object):
         self.page_string = "<html><head><title>Welcome to the Labyrinth</title></head><body><ul>{0}</ul></body></html>"
         self.link_string = '<li><a href="{0}">{0}</a></li>'
         self.builder = builder
+        self.responses = []
+        self.responses.extend( (self.response_linkpage,) * 3 )
+        self.responses.extend( (self.response_redirect,) * 1 )
+        self.responses.extend( (self.response_inf_redirect,) * 1 )
 
     def response_linkpage(self, handler):
         links = []
@@ -45,6 +49,33 @@ class Tarpyt(object):
         handler.send_header('Location','/'+chr(random.randint(0x61,0x7A)))
         handler.end_headers()
 
+    def response_inf_redirect(self, handler):
+        modulus = len(self.responses)
+        newpath = handler.path
+        tmp = 0
+        chord = 0
+        pos = len(handler.path) - 1
+        while pos > 0:
+            chord = ord(newpath[pos])
+            tmp = chord + modulus
+            while tmp != chord:
+                if tmp > ord('z'):
+                    tmp %= modulus
+                if (tmp >= 0x30 and tmp <= 0x39) \
+                        or (tmp >= 0x41 and tmp <= 0x5A) \
+                        or (tmp >= 0x61 and tmp <= 0x7A):
+                            break
+                tmp += modulus
+            if tmp == chord:
+                pos -= 1
+            else:
+                break
+        if pos != 0:
+            newpath = newpath[:pos] + chr(tmp) + newpath[pos+1:]
+        handler.send_response(302)
+        handler.send_header('Location',newpath)
+        handler.end_headers()
+
     def response_robots(self, handler):
         robots = "User-agent: *\nDisallow: /\n"
         handler.send_response(200)
@@ -56,11 +87,8 @@ class Tarpyt(object):
         if handler.path == '/robots.txt' and handler.command == 'GET':
             #play nice with robots
             return self.response_robots
-        responses = []
-        responses.extend( (self.response_linkpage,) * 3 )
-        responses.extend( (self.response_redirect,) * 1 )
-        index = adler32(handler.command + handler.path) % len(responses)
-        return responses[index]
+        index = adler32(handler.command + handler.path) % len(self.responses)
+        return self.responses[index]
 
     def run(self):
         server_class=BaseHTTPServer.HTTPServer
