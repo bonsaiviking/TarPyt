@@ -5,6 +5,7 @@ import random
 from zlib import adler32
 from optparse import OptionParser
 import pickle
+import time
 
 from genmarkov import MarkovBuilder, TagState, MarkovChain
 
@@ -37,6 +38,23 @@ class Tarpyt(object):
         self.responses.extend( (self.response_redirect,) * 1 )
         self.responses.extend( (self.response_inf_redirect,) * 1 )
         self.responses.extend( (self.response_oversize,) * 1 )
+        self.responses.extend( (self.response_slow,) *1 )
+
+    def response_slow(self, handler):
+        """ Category: tarpit
+        Returns an html page, but very slowly
+        """
+        content = None
+        if self.builder:
+            content = self.builder.generate()
+        else:
+            content = "A" * 4096
+        handler.send_response(200)
+        handler.send_header('Content-Length',len(content))
+        handler.end_headers()
+        for char in content:
+            time.sleep(1)
+            handler.wfile.write(char)
 
     def response_linkpage(self, handler):
         """ Category: tarpit

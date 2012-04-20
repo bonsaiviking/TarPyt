@@ -11,15 +11,16 @@ A random list of features, to be better organized later:
 * "Random" different responses (HTTP redirects, link pages, etc.)
 * Base response on a hash of the request, so it's consistent
 * Generate Markov chains of HTML and URI paths for realistic responses
+* Infinite redirects, slow responses
 
 Todo
 ----
 * Hide fingerprint (server header) or fake a real one
 * Shell script to get top 100 Alexa sites and build markov chains
 * Use Markov chains to build HTML in responses
-* Infinite redirects
 * False positives for scanners: SQLi (database errors), etc.
 * abstract-out the functionality to use with WSGI, FastCGI, etc.
+* Alerting, stats?
 
 Attacks
 -------

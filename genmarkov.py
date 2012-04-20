@@ -106,7 +106,8 @@ class MarkovBuilder(HTMLParser, object):
         out = open(filename, mode='wb')
         pickle.dump(self, out, protocol=2)
 
-    def generate(self, tag='html', out=sys.stdout):
+    def generate(self, tag='html'):
+        out = []
         while tag != '$': #Goes forever-ish?
         #for _ in xrange(self.siblings.maxcount):
         #    if tag == '$': break
@@ -115,17 +116,18 @@ class MarkovBuilder(HTMLParser, object):
             while attr != '$':
                 contents.append(attr)
                 attr = self.attrs.get(attr)
-            out.write(u'<{0}>\n'.format(' '.join(contents)).encode('utf-8'))
+            out.append(u'<{0}>\n'.format(' '.join(contents)).encode('utf-8'))
             data = self.data.get(tag)
             if data and data != '$':
-                out.write(data.encode('utf-8'))
+                out.append(data.encode('utf-8'))
             first_child = self.children.get(tag)
             if first_child and first_child != '$':
                 self.gendepth += 1
                 if self.gendepth <= self.maxdepth:
-                    self.generate(first_child)
-            out.write(u'</{0}>\n'.format(tag).encode('utf-8'))
+                    out.append(self.generate(first_child))
+            out.append(u'</{0}>\n'.format(tag).encode('utf-8'))
             tag = self.siblings.get(tag)
+        return ''.join(out)
 
     def reset(self):
         super(MarkovBuilder, self).reset()
@@ -181,4 +183,4 @@ if __name__=='__main__':
     builder = parse(args)
     if options.pickle:
         builder.save(options.pickle)
-    builder.generate()
+    print builder.generate()
