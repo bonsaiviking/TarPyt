@@ -1,32 +1,26 @@
 #!/usr/bin/env python
 
-import BaseHTTPServer
+from wsgiref.simple_server import make_server
 import random
 from zlib import adler32
 from optparse import OptionParser
 import pickle
 import time
+#import sys #stderr
 
 from genmarkov import MarkovBuilder, TagState, MarkovChain
 
-class TarpytHandler(BaseHTTPServer.BaseHTTPRequestHandler):
-    pass
-
 class Tarpyt(object):
     def __init__(self, builder=None):
-        self.handler_class = TarpytHandler
-        for verb in ('GET','POST','HEAD'):
-            setattr(self.handler_class, 'do_'+verb, lambda h: self.pick_response(h)(h))
-        self.handler_class.server_version = 'Apache/1.3.14'
         self.builder = builder
         if self.builder:
             def getlink(path='/'):
                 pathlist = ['^']
-                pathlist.extend(path.split('/'))
+                pathlist.extend(filter(lambda x: x, path.split('/')))
                 elem = self.builder.uripaths.get(pathlist[-1])
                 if elem == '$':
-                    elem = chr(random.randint(0x61,0x7A))
-                return '/'.join(pathlist[1:]+[elem])
+                    elem = self.builder.uripaths.get(None)
+                return '/'+'/'.join(pathlist[1:]+[elem])
             self.getlink = getlink
         else:
             def getlink(path='/'):
@@ -40,7 +34,7 @@ class Tarpyt(object):
         self.responses.extend( (self.response_oversize,) * 1 )
         self.responses.extend( (self.response_slow,) *1 )
 
-    def response_slow(self, handler):
+    def response_slow(self, environ, start_response):
         """ Category: tarpit
         Returns an html page, but very slowly
         """
@@ -49,49 +43,55 @@ class Tarpyt(object):
             content = self.builder.generate()
         else:
             content = "A" * 4096
-        handler.send_response(200)
-        handler.send_header('Content-Length',len(content))
-        handler.end_headers()
+        status = '200 OK'
+        headers = [('Content-Length',str(len(content)))]
+        start_response(status, headers)
         for char in content:
+            yield char
             time.sleep(1)
-            handler.wfile.write(char)
 
-    def response_linkpage(self, handler):
+    def response_linkpage(self, environ, start_response):
         """ Category: tarpit
         Returns an html page full of links
         """
         page_string = "<html><head><title>Welcome to the Labyrinth</title></head><body><ul>{0}</ul></body></html>"
         link_string = '<li><a href="{0}">{0}</a></li>'
         links = []
+        prev_href = ''
         for n in range(0,5):
-            href = self.getlink(handler.path)
+            href = self.getlink(environ['PATH_INFO'])
+            if href == prev_href:
+                href = self.getlink('/'+chr(random.randint(0x61,0x7A)))
+            else:
+                prev_href = href
             links.append(link_string.format(href))
         response_body = page_string.format(''.join(links))
-        handler.send_response(200)
-        handler.send_header('Content-Length',len(response_body))
-        handler.end_headers()
-        handler.wfile.write(response_body)
+        status = '200 OK'
+        start_response(status, [])
+        return [response_body]
 
-    def response_redirect(self, handler):
+    def response_redirect(self, environ, start_response):
         """ Category: realism
         Redirects to a random page
         """
-        handler.send_response(302)
-        handler.send_header('Location',self.getlink())
-        handler.end_headers()
+        status = '302 Found'
+        headers = [('Location',self.getlink().encode('utf-8'))]
+        start_response(status, headers)
+        return ""
 
-    def response_inf_redirect(self, handler):
+    def response_inf_redirect(self, environ, start_response):
         """ Category: tarpit
         Returns a 302 redirect to a page which has the same modulus as the
         one requested, resulting in an infinite redirect. Loops eventually.
         If a suitable redirect cannot be made, falls back to appending a
         random path element to the path requested.
         """
+        path = environ['PATH_INFO']
         modulus = len(self.responses)
-        newpath = handler.path
+        newpath = path
         tmp = 0
         chord = 0
-        pos = len(handler.path) - 1
+        pos = len(path) - 1
         while pos > 0:
             chord = ord(newpath[pos])
             tmp = chord + modulus
@@ -111,11 +111,12 @@ class Tarpyt(object):
             newpath = newpath[:pos] + chr(tmp) + newpath[pos+1:]
         else:
             newpath = self.getlink(newpath)
-        handler.send_response(302)
-        handler.send_header('Location',newpath)
-        handler.end_headers()
+        status = '302 Found'
+        headers = [('Location',newpath.encode('utf-8'))]
+        start_response(status, headers)
+        return ""
 
-    def response_oversize(self, handler):
+    def response_oversize(self, environ, start_response):
         """ Category: attack
         Sends an oversized Content-Length header. Some web servers have had
         Denial of Service vulnerabilities due to preallocating memory or disk
@@ -123,32 +124,29 @@ class Tarpyt(object):
         similar vulns (See, e.g., feature request for wget: 
         https://lists.gnu.org/archive/html/bug-wget/2012-01/msg00054.html)
         """
-        handler.send_response(200)
-        handler.send_header('Content-Length',4 * 2**30) #4GB
-        handler.end_headers()
+        status = '200 OK'
+        headers = [('Content-Length', str(4 * 2**30))]
+        start_response(status, headers)
+        return ["",""] #Prevent WSGI from calculating content-length
 
-    def response_robots(self, handler):
+    def response_robots(self, environ, start_response):
         """ Category: safety
         Sends a robots.txt which disallows all paths for all robots. This
         should guarantee no innocent spiders get caught in our tarpit.
         """
         robots = "User-agent: *\nDisallow: /\n"
-        handler.send_response(200)
-        handler.send_header('Content-Length',len(robots))
-        handler.end_headers()
-        handler.wfile.write(robots)
+        status = '200 OK'
+        start_response(status, [])
+        return [robots]
 
-    def pick_response(self, handler):
-        if handler.path == '/robots.txt' and handler.command == 'GET':
+    def application(self, environ, start_response):
+        verb = environ['REQUEST_METHOD']
+        path = environ['PATH_INFO']
+        if path == '/robots.txt' and verb == 'GET':
             #play nice with robots
-            return self.response_robots
-        index = adler32(handler.command + handler.path) % len(self.responses)
-        return self.responses[index]
-
-    def run(self):
-        server_class=BaseHTTPServer.HTTPServer
-        httpd = server_class(('',8080), self.handler_class)
-        httpd.serve_forever()
+            return self.response_robots(environ, start_response)
+        index = adler32(verb + path) % len(self.responses)
+        return self.responses[index](environ, start_response)
 
 if __name__=='__main__':
     parser = OptionParser()
@@ -159,4 +157,6 @@ if __name__=='__main__':
     if options.markov:
         mfile = open(options.markov, 'rb')
         builder = pickle.load(mfile)
-    Tarpyt(builder=builder).run()
+    tarpyt = Tarpyt(builder=builder)
+    httpd = make_server('', 8080, tarpyt.application)
+    httpd.serve_forever()

@@ -23,7 +23,7 @@ class MarkovChain(object):
 
     def get(self, prev_word):
         if not (prev_word in self.words):
-            return '$'
+            return random.choice(self.words.keys())
         followers = self.words[prev_word]
         allcounts = sum(followers.itervalues())
         randval = random.randint(1,allcounts)
