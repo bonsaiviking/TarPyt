@@ -122,10 +122,10 @@ class MarkovBuilder(HTMLParser, object):
                 while attr != '$':
                     contents.append(attr)
                     attr = self.attrs.get(attr)
-            out.append(u'<{0}>\n'.format(' '.join(contents)).encode('utf-8'))
+            out.append(u'<{0}>\n'.format(' '.join(contents)))
             data = self.data.get(tag)
             if data and data != '$':
-                out.append(data.encode('utf-8'))
+                out.append(data)
             first_child = self.children.get(tag)
             if first_child and first_child != '$':
                 depth += 1
@@ -134,7 +134,7 @@ class MarkovBuilder(HTMLParser, object):
                         first_child,
                         generate_links=generate_links,
                         depth=depth))
-            out.append(u'</{0}>\n'.format(tag).encode('utf-8'))
+            out.append(u'</{0}>\n'.format(tag))
             tag = self.siblings.get(tag)
         return ''.join(out)
 
