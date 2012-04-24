@@ -34,7 +34,7 @@ class MarkovChain(object):
                 return word
 
 class TagState(object):
-    def __init__(self, tag=None, prev='^'):
+    def __init__(self, tag='^', prev='^'):
         self.prev_child = prev
         self.tag = tag
 
@@ -106,25 +106,34 @@ class MarkovBuilder(HTMLParser, object):
         out = open(filename, mode='wb')
         pickle.dump(self, out, protocol=2)
 
-    def generate(self, tag='html'):
+    def generate(self, tag='html', generate_links=False, depth=0):
         out = []
-        while tag != '$': #Goes forever-ish?
-        #for _ in xrange(self.siblings.maxcount):
-        #    if tag == '$': break
+        count = 0
+        while tag != '$' and count <= self.siblings.maxcount:
+            count += 1
             contents = []
-            attr = tag
-            while attr != '$':
-                contents.append(attr)
-                attr = self.attrs.get(attr)
+            if generate_links and tag == 'a':
+                path = ['^']
+                while path[-1] != '$':
+                    path.append(self.uripaths.get(path[-1]))
+                contents = [tag]+[u'href="/{0}"'.format('/'.join(path[1:-1]))]
+            else:
+                attr = tag
+                while attr != '$':
+                    contents.append(attr)
+                    attr = self.attrs.get(attr)
             out.append(u'<{0}>\n'.format(' '.join(contents)).encode('utf-8'))
             data = self.data.get(tag)
             if data and data != '$':
                 out.append(data.encode('utf-8'))
             first_child = self.children.get(tag)
             if first_child and first_child != '$':
-                self.gendepth += 1
-                if self.gendepth <= self.maxdepth:
-                    out.append(self.generate(first_child))
+                depth += 1
+                if depth <= self.maxdepth:
+                    out.append(self.generate(
+                        first_child,
+                        generate_links=generate_links,
+                        depth=depth))
             out.append(u'</{0}>\n'.format(tag).encode('utf-8'))
             tag = self.siblings.get(tag)
         return ''.join(out)

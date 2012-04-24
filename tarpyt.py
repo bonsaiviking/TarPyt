@@ -40,13 +40,13 @@ class Tarpyt(object):
         """
         content = None
         if self.builder:
-            content = self.builder.generate()
+            content = self.builder.generate(generate_links=True)
         else:
-            content = "A" * 4096
+            content = u"A" * 4096
         status = '200 OK'
         headers = [('Content-Length',str(len(content)))]
         start_response(status, headers)
-        for char in content:
+        for char in content.encode('utf-8'):
             yield char
             time.sleep(1)
 
@@ -54,20 +54,26 @@ class Tarpyt(object):
         """ Category: tarpit
         Returns an html page full of links
         """
-        page_string = "<html><head><title>Welcome to the Labyrinth</title></head><body><ul>{0}</ul></body></html>"
-        link_string = '<li><a href="{0}">{0}</a></li>'
-        links = []
-        prev_href = ''
-        for n in range(0,5):
-            href = self.getlink(environ['PATH_INFO'])
-            if href == prev_href:
-                href = self.getlink('/'+chr(random.randint(0x61,0x7A)))
-            else:
-                prev_href = href
-            links.append(link_string.format(href))
-        response_body = page_string.format(''.join(links))
+        response_body = None
+        if self.builder:
+            response_body = self.builder.generate(generate_links=True)
+        else:
+            page_string = "<html><head><title>Welcome to the Labyrinth</title></head><body><ul>{0}</ul></body></html>"
+            link_string = '<li><a href="{0}">{0}</a></li>'
+            links = []
+            prev_href = ''
+            for n in range(0,5):
+                href = self.getlink(environ['PATH_INFO'])
+                if href == prev_href:
+                    href = self.getlink('/'+chr(random.randint(0x61,0x7A)))
+                else:
+                    prev_href = href
+                links.append(link_string.format(href))
+            response_body = page_string.format(''.join(links))
         status = '200 OK'
         start_response(status, [])
+        if isinstance(response_body, unicode):
+            response_body = response_body.encode('utf-8')
         return [response_body]
 
     def response_redirect(self, environ, start_response):
@@ -75,7 +81,10 @@ class Tarpyt(object):
         Redirects to a random page
         """
         status = '302 Found'
-        headers = [('Location',self.getlink().encode('utf-8'))]
+        location = self.getlink()
+        if isinstance(location, unicode):
+            location = urllib.quote(location.encode('utf-8'))
+        headers = [('Location', location)]
         start_response(status, headers)
         return ""
 
@@ -112,7 +121,9 @@ class Tarpyt(object):
         else:
             newpath = self.getlink(newpath)
         status = '302 Found'
-        headers = [('Location',newpath.encode('utf-8'))]
+        if isinstance(newpath, unicode):
+            newpath = urllib.quote(newpath.encode('utf-8'))
+        headers = [('Location', newpath)]
         start_response(status, headers)
         return ""
 
@@ -157,6 +168,7 @@ if __name__=='__main__':
     if options.markov:
         mfile = open(options.markov, 'rb')
         builder = pickle.load(mfile)
+        mfile.close()
     tarpyt = Tarpyt(builder=builder)
     httpd = make_server('', 8080, tarpyt.application)
     httpd.serve_forever()
