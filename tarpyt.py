@@ -4,6 +4,8 @@ from wsgiref.simple_server import make_server
 import random
 from zlib import adler32
 from optparse import OptionParser
+#from ConfigParser import SafeConfigParser
+from bisect import bisect_right
 import pickle
 import time
 #import sys #stderr
@@ -11,28 +13,40 @@ import time
 from genmarkov import MarkovBuilder, TagState, MarkovChain
 
 class Tarpyt(object):
-    def __init__(self, builder=None):
-        self.builder = builder
-        if self.builder:
-            def getlink(path='/'):
-                pathlist = ['^']
-                pathlist.extend(filter(lambda x: x, path.split('/')))
-                elem = self.builder.uripaths.get(pathlist[-1])
-                if elem == '$':
-                    elem = self.builder.uripaths.get(None)
-                return '/'+'/'.join(pathlist[1:]+[elem])
-            self.getlink = getlink
-        else:
-            def getlink(path='/'):
-                next_path = path.rstrip('/') + '/{0}'
-                return next_path.format(chr(random.randint(0x61,0x7A)))
-            self.getlink = getlink
+    def __init__(self, config=None):
+        self.builder = None
+        self.weight_total = 0
         self.responses = []
-        self.responses.extend( (self.response_linkpage,) * 4 )
-        self.responses.extend( (self.response_redirect,) * 1 )
-        self.responses.extend( (self.response_inf_redirect,) * 1 )
-        self.responses.extend( (self.response_oversize,) * 1 )
-        self.responses.extend( (self.response_slow,) *1 )
+        def update(response):
+            self.responses.append(response[0])
+            self.weight_total += response[1]
+            return self.weight_total
+        self.weights = map(update, sorted((
+            (self.response_linkpage, 4 ),
+            (self.response_redirect, 1 ),
+            (self.response_inf_redirect, 1 ),
+            (self.response_oversize, 1 ),
+            (self.response_slow, 1 ),
+            ), key=lambda x: x[1]))
+
+    def getresponse(self, key):
+        index = adler32(key) % self.weight_total
+        return self.responses[bisect_right(self.weights, index)]
+
+    def getlink(self, path='/'):
+        next_path = path.rstrip('/') + '/{0}'
+        return next_path.format(chr(random.randint(0x61,0x7A)))
+
+    def set_builder(self, builder):
+        self.builder = builder
+        def getlink(path='/'):
+            pathlist = ['^']
+            pathlist.extend(filter(lambda x: x, path.split('/')))
+            elem = self.builder.uripaths.get(pathlist[-1])
+            if elem == '$':
+                elem = self.builder.uripaths.get(None)
+            return '/'+'/'.join(pathlist[1:]+[elem])
+        self.getlink = getlink
 
     def response_slow(self, environ, start_response):
         """ Category: tarpit
@@ -156,8 +170,7 @@ class Tarpyt(object):
         if path == '/robots.txt' and verb == 'GET':
             #play nice with robots
             return self.response_robots(environ, start_response)
-        index = adler32(verb + path) % len(self.responses)
-        return self.responses[index](environ, start_response)
+        return self.getresponse(verb + path)(environ, start_response)
 
 if __name__=='__main__':
     parser = OptionParser()
@@ -165,10 +178,11 @@ if __name__=='__main__':
             help='A pickled MarkovBuilder', metavar='FILE')
     (options, args) = parser.parse_args()
     builder = None
+    tarpyt = Tarpyt()
     if options.markov:
         mfile = open(options.markov, 'rb')
         builder = pickle.load(mfile)
+        tarpyt.set_builder(builder)
         mfile.close()
-    tarpyt = Tarpyt(builder=builder)
     httpd = make_server('', 8080, tarpyt.application)
     httpd.serve_forever()
