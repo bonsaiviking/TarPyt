@@ -4,30 +4,44 @@ from wsgiref.simple_server import make_server
 import random
 from zlib import adler32
 from optparse import OptionParser
-#from ConfigParser import SafeConfigParser
+from ConfigParser import SafeConfigParser, NoOptionError
 from bisect import bisect_right
 import pickle
 import time
+import urllib
 #import sys #stderr
 
 from genmarkov import MarkovBuilder, TagState, MarkovChain
 
 class Tarpyt(object):
     def __init__(self, config=None):
-        self.builder = None
+        conf = SafeConfigParser()
+        if config:
+            if hasattr(config, 'readline'):
+                conf.readfp(config)
+            else:
+                conf.read(config)
+        if conf.has_section('tarpyt'):
+            try:
+                mkvfile = conf.get('tarpyt','markov_file')
+                mfile = open(mkvfile, 'rb')
+                self.set_builder(pickle.load(mfile))
+            except NoOptionError:
+                self.builder = None
         self.weight_total = 0
         self.responses = []
-        def update(response):
-            self.responses.append(response[0])
-            self.weight_total += response[1]
-            return self.weight_total
-        self.weights = map(update, sorted((
-            (self.response_linkpage, 4 ),
-            (self.response_redirect, 1 ),
-            (self.response_inf_redirect, 1 ),
-            (self.response_oversize, 1 ),
-            (self.response_slow, 1 ),
-            ), key=lambda x: x[1]))
+        if conf.has_section('responses'):
+            def update(response):
+                self.responses.append(
+                        getattr(self, 'response_' + response[0]) )
+                self.weight_total += int(response[1])
+                return self.weight_total
+            self.weights = map(update,
+                sorted( conf.items('responses'), key=lambda x: int(x[1]) ))
+        else:
+            self.responses.append(self.response_linkpage)
+            self.weights = [1]
+            self.weight_total = 1
 
     def getresponse(self, key):
         index = adler32(key) % self.weight_total
@@ -174,15 +188,9 @@ class Tarpyt(object):
 
 if __name__=='__main__':
     parser = OptionParser()
-    parser.add_option('-m', '--markov',
-            help='A pickled MarkovBuilder', metavar='FILE')
+    parser.add_option('-f', '--config',
+            help='Tarpyt config file', metavar='FILE')
     (options, args) = parser.parse_args()
-    builder = None
-    tarpyt = Tarpyt()
-    if options.markov:
-        mfile = open(options.markov, 'rb')
-        builder = pickle.load(mfile)
-        tarpyt.set_builder(builder)
-        mfile.close()
+    tarpyt = Tarpyt(options.config)
     httpd = make_server('', 8080, tarpyt.application)
     httpd.serve_forever()
