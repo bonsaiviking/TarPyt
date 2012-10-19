@@ -1,20 +1,21 @@
 #!/usr/bin/env python
 
-from wsgiref.simple_server import make_server
 import random
 from zlib import adler32
-from optparse import OptionParser
 from ConfigParser import SafeConfigParser, NoOptionError
 from bisect import bisect_right
 import pickle
 import time
 import urllib
+import os
 #import sys #stderr
 
 from genmarkov import MarkovBuilder, TagState, MarkovChain
 
 class Tarpyt(object):
     def __init__(self, config=None):
+        self.builder = None
+        self.www_dir = None
         conf = SafeConfigParser()
         if config:
             if hasattr(config, 'readline'):
@@ -28,6 +29,11 @@ class Tarpyt(object):
                 self.set_builder(pickle.load(mfile))
             except NoOptionError:
                 self.builder = None
+            try:
+                www = conf.get('tarpyt', 'www_dir')
+                self.www_dir = os.path.abspath(www) if os.path.isdir(www) else None
+            except NoOptionError:
+                self.www_dir = None
         self.weight_total = 0
         self.responses = []
         if conf.has_section('responses'):
@@ -91,11 +97,7 @@ class Tarpyt(object):
             links = []
             prev_href = ''
             for n in range(0,5):
-                href = self.getlink(environ['PATH_INFO'])
-                if href == prev_href:
-                    href = self.getlink('/'+chr(random.randint(0x61,0x7A)))
-                else:
-                    prev_href = href
+                href = self.getlink(os.path.normpath(environ['SCRIPT_NAME']+'/'+environ['PATH_INFO']))
                 links.append(link_string.format(href))
             response_body = page_string.format(''.join(links))
         status = '200 OK'
@@ -109,7 +111,7 @@ class Tarpyt(object):
         Redirects to a random page
         """
         status = '302 Found'
-        location = self.getlink()
+        location = self.getlink(environ['SCRIPT_NAME'])
         if isinstance(location, unicode):
             location = urllib.quote(location.encode('utf-8'))
         headers = [('Location', location)]
@@ -123,12 +125,11 @@ class Tarpyt(object):
         If a suitable redirect cannot be made, falls back to appending a
         random path element to the path requested.
         """
-        path = environ['PATH_INFO']
-        modulus = len(self.responses)
-        newpath = path
+        newpath = environ['PATH_INFO']
+        modulus = self.weight_total
         tmp = 0
         chord = 0
-        pos = len(path) - 1
+        pos = len(newpath) - 1
         while pos > 0:
             chord = ord(newpath[pos])
             tmp = chord + modulus
@@ -151,7 +152,7 @@ class Tarpyt(object):
         status = '302 Found'
         if isinstance(newpath, unicode):
             newpath = urllib.quote(newpath.encode('utf-8'))
-        headers = [('Location', newpath)]
+        headers = [('Location', os.path.normpath(environ['SCRIPT_NAME']+'/'+newpath))]
         start_response(status, headers)
         return ""
 
@@ -180,17 +181,16 @@ class Tarpyt(object):
 
     def application(self, environ, start_response):
         verb = environ['REQUEST_METHOD']
-        path = environ['PATH_INFO']
-        if path == '/robots.txt' and verb == 'GET':
-            #play nice with robots
-            return self.response_robots(environ, start_response)
+        path = os.path.normpath('/'+environ['PATH_INFO'])
+        if self.www_dir:
+            filepath = os.path.normpath( os.path.sep.join((self.www_dir, path)) )
+            if filepath.startswith(self.www_dir):
+                try:
+                    serve = open(filepath, 'rb')
+                    body = [serve.read()]
+                    start_response('200 OK', [])
+                    return body
+                except Exception as e:
+                    pass
         return self.getresponse(verb + path)(environ, start_response)
 
-if __name__=='__main__':
-    parser = OptionParser()
-    parser.add_option('-f', '--config',
-            help='Tarpyt config file', metavar='FILE')
-    (options, args) = parser.parse_args()
-    tarpyt = Tarpyt(options.config)
-    httpd = make_server('', 8080, tarpyt.application)
-    httpd.serve_forever()
